@@ -1,0 +1,58 @@
+# Environment and secrets
+.env
+.env.local
+*.env
+
+# Python
+.venv/
+venv/
+in/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database (local data)
+errors.db
+*.db
+
+# Temp and uploads
+tmp/
+temp/
+*.tmp
+*.log
+logs/
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/

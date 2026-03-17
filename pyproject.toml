@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "1c-error-analyzer"
+version = "0.1.0"
+description = "CLI для анализа ошибок 1С на основе архивов (zip) с screenshot и report.json"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "typer>=0.9.0",
+    "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli*", "services*", "db*", "utils*"]

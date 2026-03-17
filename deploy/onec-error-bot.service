@@ -1,0 +1,27 @@
+# systemd unit for 1C Error Analyzer Telegram bot
+# Install: sudo cp deploy/onec-error-bot.service /etc/systemd/system/
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable onec-error-bot
+#          sudo systemctl start onec-error-bot
+# Logs:    journalctl -u onec-error-bot -f
+
+[Unit]
+Description=1C Error Analyzer Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/path/to/1c-error-analyzer
+Environment=PATH=/path/to/1c-error-analyzer/.venv/bin
+EnvironmentFile=/path/to/1c-error-analyzer/.env
+ExecStart=/path/to/1c-error-analyzer/.venv/bin/python -m telegram_bot.bot
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onec-error-bot
+
+[Install]
+WantedBy=multi-user.target
