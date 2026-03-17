@@ -87,20 +87,24 @@ def insert_error(
 
 def list_errors(
     status: str | None = None,
+    limit: int | None = None,
     db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """List errors, optionally filtered by status."""
+    """List errors, optionally filtered by status. Newest first (id DESC)."""
     conn = _connect(db_path)
     try:
+        params: list[Any] = []
         if status:
             if status not in VALID_STATUSES:
                 raise ValueError(f"Invalid status: {status}. Use one of: {VALID_STATUSES}")
-            cur = conn.execute(
-                "SELECT * FROM errors WHERE status = ? ORDER BY created_at DESC",
-                (status,),
-            )
+            query = "SELECT * FROM errors WHERE status = ? ORDER BY id DESC"
+            params.append(status)
         else:
-            cur = conn.execute("SELECT * FROM errors ORDER BY created_at DESC")
+            query = "SELECT * FROM errors ORDER BY id DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        cur = conn.execute(query, params)
         return [_row_to_error(r) for r in cur.fetchall()]
     finally:
         conn.close()

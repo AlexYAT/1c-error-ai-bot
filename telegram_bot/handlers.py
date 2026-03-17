@@ -6,6 +6,7 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 from telegram import Update
 from telegram.ext import (
@@ -109,6 +110,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/list — последние ошибки; /list new — только со статусом new\n"
         "/show 15 — полная карточка ошибки 15 и похожие\n"
         "/status 15 resolved — закрыть с комментарием (бот спросит комментарий)\n"
+        "/apply_related 15 — применить статус ошибки 15 к похожим ошибкам в других базах\n"
         "/report 2026-03-01 2026-03-17 — сводка за период"
     )
 
@@ -266,11 +268,11 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Статус: new, in_progress, resolved, ignored")
         return
     try:
-        rows = repo.list_errors(status=status)
+        rows = repo.list_errors(status=status, limit=20)
     except ValueError as e:
         await update.message.reply_text(str(e))
         return
-    text = format_list_errors(rows)
+    text = format_list_errors(rows, limit=20)
     if len(text) > MAX_MESSAGE_LENGTH:
         text = text[:MAX_MESSAGE_LENGTH - 20] + "\n..."
     await update.message.reply_text(text or "Нет записей.")
@@ -333,8 +335,39 @@ async def _send_cross_base_suggestions(
     row = repo.get_error_by_id(error_id)
     if not row:
         return
-    base_name = row.get("base_name")
-    stack = row.get("stack_json")
+    cross_base = _get_cross_base_candidates(row, exclude_id=error_id, top_n=5)
+    if not cross_base:
+        return
+    lines = [
+        "",
+        "Найдены похожие ошибки в других базах:",
+    ]
+    for sid, other_base, score in cross_base:
+        lines.append(f"- ID {sid} | база {other_base} | score {score}")
+    lines.append(
+        "При необходимости можно применить тот же статус к этим ошибкам отдельно (через /status)."
+    )
+    text = "\n".join(lines)
+    if len(text) > MAX_MESSAGE_LENGTH:
+        text = text[:MAX_MESSAGE_LENGTH - 20] + "\n..."
+    await update.message.reply_text(text)
+
+
+def _get_cross_base_candidates(
+    source_row: dict[str, Any],
+    exclude_id: int,
+    top_n: int = 5,
+) -> list[tuple[int, str, float]]:
+    """
+    Общая логика поиска похожих ошибок в других базах:
+    - тот же механизм similarity
+    - только другие базы
+    - только score >= CROSS_BASE_SCORE_THRESHOLD
+    - только не resolved/ignored
+    Возвращает список (id, base_name, score).
+    """
+    base_name = source_row.get("base_name")
+    stack = source_row.get("stack_json")
     if isinstance(stack, str):
         import json
 
@@ -343,18 +376,17 @@ async def _send_cross_base_suggestions(
         except Exception:
             stack = []
     similar = find_similar_errors(
-        error_description=row.get("error_description"),
+        error_description=source_row.get("error_description"),
         module_name=get_module_name_from_stack(stack),
-        code_line=row.get("error_code_line"),
-        window_type=row.get("window_type"),
-        window_title=row.get("window_title"),
-        exclude_id=error_id,
-        top_n=5,
+        code_line=source_row.get("error_code_line"),
+        window_type=source_row.get("window_type"),
+        window_title=source_row.get("window_title"),
+        exclude_id=exclude_id,
+        top_n=top_n,
     )
     if not similar:
-        return
-    # Обогащаем base_name и фильтруем по другим базам, статусам и порогу score
-    cross_base = []
+        return []
+    cross_base: list[tuple[int, str, float]] = []
     for s in similar:
         sid = s.get("error_id")
         if not sid:
@@ -373,21 +405,7 @@ async def _send_cross_base_suggestions(
         if (other.get("status") or "").lower() in ("resolved", "ignored"):
             continue
         cross_base.append((sid, other_base or "—", score))
-    if not cross_base:
-        return
-    lines = [
-        "",
-        "Найдены похожие ошибки в других базах:",
-    ]
-    for sid, other_base, score in cross_base:
-        lines.append(f"- ID {sid} | база {other_base} | score {score}")
-    lines.append(
-        "При необходимости можно применить тот же статус к этим ошибкам отдельно (через /status)."
-    )
-    text = "\n".join(lines)
-    if len(text) > MAX_MESSAGE_LENGTH:
-        text = text[:MAX_MESSAGE_LENGTH - 20] + "\n..."
-    await update.message.reply_text(text)
+    return cross_base
 
 
 # --- /status ---
@@ -446,6 +464,83 @@ async def status_receive_comment(update: Update, context: ContextTypes.DEFAULT_T
     # Подсказка по похожим ошибкам в других базах
     await _send_cross_base_suggestions(update, error_id=eid, new_status=new_status)
     return ConversationHandler.END
+
+
+# --- /apply_related ---
+
+
+async def cmd_apply_related(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Массовое применение статуса исходной ошибки к похожим ошибкам в других базах.
+    Использование: /apply_related <source_id>
+    """
+    args = (context.args or [])
+    if len(args) < 1:
+        await update.message.reply_text("Использование: /apply_related <source_id>")
+        return
+    try:
+        source_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("ID должен быть числом.")
+        return
+    source = repo.get_error_by_id(source_id)
+    if not source:
+        await update.message.reply_text(f"Ошибка с id={source_id} не найдена.")
+        return
+    status = (source.get("status") or "").lower()
+    if status not in ("resolved", "ignored"):
+        await update.message.reply_text(
+            "Команда доступна только для ошибок со статусом resolved или ignored."
+        )
+        return
+    # Найти похожие в других базах с теми же фильтрами, что в подсказке
+    candidates = _get_cross_base_candidates(source, exclude_id=source_id, top_n=10)
+    if not candidates:
+        await update.message.reply_text(
+            "Подходящие похожие ошибки в других базах не найдены."
+        )
+        return
+    # Комментарий-решение для resolved (если есть)
+    comment_to_apply: str | None = None
+    if status == "resolved":
+        solution = repo.get_solution_for_error(source_id)
+        if solution and (solution.get("comment") or "").strip():
+            comment_to_apply = solution["comment"]
+        elif source.get("last_resolution_comment"):
+            comment_to_apply = source["last_resolution_comment"]
+    updated: list[tuple[int, str]] = []
+    skipped = 0
+    errors = 0
+    for cid, other_base, _score in candidates:
+        try:
+            ok = repo.set_status(
+                cid,
+                status,
+                comment=comment_to_apply if status == "resolved" else None,
+            )
+        except ValueError:
+            errors += 1
+            continue
+        if ok:
+            updated.append((cid, other_base))
+        else:
+            skipped += 1
+    lines = [
+        "Применение завершено.",
+        f"Источник: ID {source_id} | статус {status}",
+        f"Обновлено: {len(updated)}",
+        f"Пропущено: {skipped}",
+        f"Ошибки: {errors}",
+    ]
+    if updated:
+        lines.append("")
+        lines.append("Обновленные записи:")
+        for cid, other_base in updated:
+            lines.append(f"- ID {cid} | база {other_base}")
+    text = "\n".join(lines)
+    if len(text) > MAX_MESSAGE_LENGTH:
+        text = text[:MAX_MESSAGE_LENGTH - 20] + "\n..."
+    await update.message.reply_text(text)
 
 
 async def status_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

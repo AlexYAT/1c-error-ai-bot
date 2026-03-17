@@ -77,14 +77,17 @@ def format_similar_block(similar: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def format_list_errors(rows: list[dict], limit: int = 15) -> str:
+def format_list_errors(rows: list[dict], limit: int = 20) -> str:
     """Список ошибок для /list."""
     if not rows:
         return "Нет записей."
     lines = []
-    for r in rows[:limit]:
+    trimmed = rows[:limit]
+    for r in trimmed:
         desc = (r.get("error_description") or "-")[:50]
         lines.append(f"{r['id']} | {r['created_at'][:10]} | {r['status']} | {r['base_name']} | {desc}...")
+    if len(rows) > limit:
+        lines.append(f"... Показаны последние {limit} записей")
     return "\n".join(lines)
 
 

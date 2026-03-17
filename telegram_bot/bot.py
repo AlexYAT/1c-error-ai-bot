@@ -28,6 +28,7 @@ from telegram_bot.handlers import (
     cmd_list,
     cmd_show,
     cmd_report,
+    cmd_apply_related,
     build_conversation_handlers,
 )
 
@@ -61,6 +62,7 @@ def main() -> None:
         app.add_handler(conv)
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("show", cmd_show))
+    app.add_handler(CommandHandler("apply_related", cmd_apply_related))
     app.add_handler(CommandHandler("report", cmd_report))
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
