@@ -41,6 +41,10 @@ def setup_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stderr,
     )
+    # Prevent leaking bot token via verbose HTTP logs (URLs contain /bot<TOKEN>/...)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.WARNING)
 
 
 def main() -> None:
